@@ -4,6 +4,8 @@
 
 Built on top of [mwaeckerlin/python], using [mwaeckerlin/python-build] for multi-stage builds. No commercial license required — uses LangGraph as an open-source Python library.
 
+This image is intended as a self-hosted alternative to `langchain/langgraph-api` for local and on-prem deployments, without requiring platform registration or commercial runtime licensing.
+
  - extremely small size, minimalistic dependencies
  - no shell, only the Python runtime
  - small attack surface
@@ -45,6 +47,24 @@ Secrets are read from `/run/secrets/` and take precedence over environment varia
  - `POST /threads` — create a conversation thread
  - `POST /threads/{thread_id}/runs` — execute a graph with checkpoint persistence
  - `GET /threads/{thread_id}/state` — retrieve thread state
+
+## Compared to langchain/langgraph-api
+
+This project focuses on a lightweight self-hosted runtime and intentionally keeps a smaller operational surface.
+
+What this image provides:
+
+- Local/on-prem deployment without platform registration.
+- No commercial runtime license requirement for this container.
+- Minimal API for graph execution and thread persistence.
+- Simple integration path for n8n and custom HTTP clients.
+
+What is intentionally out of scope compared to full platform runtimes:
+
+- Control-plane/admin APIs and platform tenancy features.
+- Managed orchestration features (advanced queueing/backpressure policies).
+- Full platform observability stack and hosted operations.
+- Managed deployment/version governance as a service.
 
 ### Docker Compose Sample
 
