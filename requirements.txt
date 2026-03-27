@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+langgraph
+langgraph-checkpoint-postgres
+langchain-openai
+psycopg[binary]
