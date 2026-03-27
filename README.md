@@ -1,109 +1,53 @@
-# langgraph-agent — Open-Source LangGraph API Service
+# LangGraph Agent API Service
 
-Minimal FastAPI service that exposes [LangGraph] as a REST API — no commercial license required.
-Docker image available on [mwaeckerlin/langgraph-agent].
+[mwaeckerlin/langgraph-agent] is a minimal FastAPI service that exposes [LangGraph] workflows as REST API — no commercial license key required.
 
-## Features
+Open-source and minimal: Just a stateless API server running as unprivileged user, with optional PostgreSQL checkpoint state storage for persistent graph execution.
 
-- 🆓 Open-source — no `langchain/langgraph-api` license key needed
-- ⚡ Minimal FastAPI service built on [LangGraph] OSS library
-- 🐘 PostgreSQL checkpoint support via `langgraph-checkpoint-postgres`
-- 🔌 Dynamic graph loading from a configurable directory
-- 🔒 Docker Secrets for sensitive values (no shell required in runtime image)
+Image size: ca. 9.87MB (depends on parent image sizes and changes)
+
+This is the most lean and secure image for NGINX servers:
+ - extremely small size, minimalistic dependencies
+ - no shell, only the server command
+ - small attack surface
+ - starts as non root user
 
 ## Port
 
-| Port | Description   |
-|------|---------------|
-| 8000 | HTTP API      |
+Exposes API on port `8000`.
 
-## Environment Variables
+## Configuration
 
-| Variable          | Description                                      | Default            |
-|-------------------|--------------------------------------------------|--------------------|
-| `DATABASE_URI`    | PostgreSQL connection URI                        |                    |
-| `OPENAI_BASE_URL` | Base URL for OpenAI-compatible API (e.g. LiteLLM) |                  |
-| `OPENAI_API_KEY`  | OpenAI API key (prefer Docker Secret)            |                    |
-| `GRAPHS_DIR`      | Directory to scan for graph modules              | `/app/graphs`      |
-| `LLM_MODEL`       | LLM model name                                   | `gpt-4o-mini`      |
+- API endpoint: `http://localhost:8000`
+- Health check: `GET /ok`
+- Graph discovery from `/app/graphs` — place `.py` modules with `graph`, `name`, `description` exports
+- Environment variables: `DATABASE_URI`, `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `GRAPHS_DIR`, `LLM_MODEL`
+- Docker Secrets: `langgraph_api_key`, `litellm_master_key`, `langgraph_db_password`
 
-## Docker Secrets
+### Docker Compose Sample
 
-Secrets are read from `/run/secrets/<name>` at runtime (no shell workaround needed).
+See `docker-compose.yml` for an example:
 
-| Secret                 | Description                          |
-|------------------------|--------------------------------------|
-| `langgraph_api_key`    | Bearer token for API authentication  |
-| `litellm_master_key`   | LiteLLM master key                   |
-| `langgraph_db_password`| PostgreSQL password (preferred)      |
+- `docker-compose build`
+- `docker-compose up`
+- browse to: `http://localhost:8000/docs` (interactive API docs)
+- stop with `Ctrl+C`
 
-## Adding Graphs
+### Command Line Example
 
-Place `.py` files in `GRAPHS_DIR`. Each file must expose:
+    docker run -it --rm --name agent -p 8000:8000 mwaeckerlin/langgraph-agent
 
-```python
-graph        # compiled LangGraph StateGraph
-name         # str — unique graph identifier
-description  # str — human-readable description
-```
+Browse to http://localhost:8000/ok. Returns 200 when healthy. Cleans up when you press `Ctrl+C`.
 
-See [`graphs/echo.py`](graphs/echo.py) for a starter example.
+### Adding Graphs
 
-## Docker Compose Example
+Place `.py` files in `GRAPHS_DIR` (default `/app/graphs`). Each module must expose:
 
-```yaml
-services:
-  langgraph-agent:
-    image: mwaeckerlin/langgraph-agent
-    ports:
-      - "8000:8000"
-    environment:
-      DATABASE_URI: postgresql://langgraph:${LANGGRAPH_DB_PASSWORD}@db/langgraph
-      OPENAI_BASE_URL: http://litellm:4000
-      LLM_MODEL: gpt-4o-mini
-      GRAPHS_DIR: /app/graphs
-    secrets:
-      - langgraph_api_key
-      - litellm_master_key
-      - langgraph_db_password
-    depends_on:
-      - db
+- `graph`: compiled LangGraph StateGraph
+- `name`: str — unique graph identifier
+- `description`: str — human-readable description
 
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: langgraph
-      POSTGRES_DB: langgraph
-      POSTGRES_PASSWORD_FILE: /run/secrets/langgraph_db_password
-    secrets:
-      - langgraph_db_password
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-
-secrets:
-  langgraph_api_key:
-    external: true
-  litellm_master_key:
-    external: true
-  langgraph_db_password:
-    external: true
-
-volumes:
-  pg_data:
-```
-
-## API Endpoints
-
-| Method | Path                          | Auth | Description                   |
-|--------|-------------------------------|------|-------------------------------|
-| GET    | `/ok`                         | No   | Health check                  |
-| GET    | `/graphs`                     | Yes  | List loaded graphs            |
-| POST   | `/runs`                       | Yes  | Stateless graph execution     |
-| POST   | `/threads`                    | Yes  | Create a new thread           |
-| POST   | `/threads/{thread_id}/runs`   | Yes  | Run graph with checkpoint     |
-| GET    | `/threads/{thread_id}/state`  | Yes  | Get thread state              |
-
-Authentication uses `Authorization: Bearer <langgraph_api_key>`.
+Example: see [`graphs/echo.py`](graphs/echo.py).
 
 [LangGraph]: https://github.com/langchain-ai/langgraph
 [mwaeckerlin/langgraph-agent]: https://hub.docker.com/r/mwaeckerlin/langgraph-agent
