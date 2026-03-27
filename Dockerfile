@@ -1,13 +1,16 @@
 FROM mwaeckerlin/python-build AS build
 
-RUN apk add --no-cache postgresql-dev
-
 COPY requirements.txt .
-RUN pip install --user --no-cache-dir -r requirements.txt
+RUN pip install --user --no-cache-dir --break-system-packages -r requirements.txt
+RUN pip install --user --no-cache-dir --break-system-packages --force-reinstall packaging
+
+COPY main.py .
+COPY app/ app/
+COPY graphs/ graphs/
 
 FROM mwaeckerlin/python
 
-COPY --from=build /root/.local /root/.local
-COPY app /app/app
-COPY graphs /app/graphs
-COPY main.py /app/main.py
+COPY --from=build /home/${BUILD_USER}/.local/lib /home/${RUN_USER}/.local/lib
+COPY --from=build /app /app
+
+EXPOSE 8000

@@ -1,11 +1,11 @@
 import os
 import uuid
 from contextlib import asynccontextmanager
-from typing import Annotated
+from pathlib import Path
 
-import psycopg
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg_pool import AsyncConnectionPool
 
 from app.auth import get_api_key
 from app.graph_loader import get_graph_info, get_graphs, load_graphs
@@ -18,32 +18,59 @@ from app.models import (
 )
 
 _checkpointer: AsyncPostgresSaver | None = None
-_db_pool = None
+_pool: AsyncConnectionPool | None = None
+
+
+def _read_secret(name: str, env_var: str | None = None) -> str:
+    path = Path(f"/run/secrets/{name}")
+    if path.exists():
+        return path.read_text().strip()
+    return os.environ.get(env_var or name.upper(), "")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _checkpointer, _db_pool
+    global _checkpointer, _pool
 
-    db_uri = os.environ.get("DATABASE_URI", "")
-    _db_pool = await psycopg.AsyncConnection.connect(db_uri, autocommit=True)
-    _checkpointer = AsyncPostgresSaver(_db_pool)
+    db_uri = os.environ.get("DATABASE_URI", "").strip()
+    if not db_uri:
+        db_password = _read_secret("langgraph_db_password")
+        if db_password:
+            db_uri = f"postgresql://langgraph:{db_password}@db:5432/langgraph"
+    if not db_uri:
+        raise RuntimeError(
+            "DATABASE_URI is required (or provide secret langgraph_db_password)"
+        )
+
+    _pool = AsyncConnectionPool(
+        conninfo=db_uri,
+        open=False,
+        kwargs={"autocommit": True},
+    )
+    await _pool.open()
+    _checkpointer = AsyncPostgresSaver(_pool)
     await _checkpointer.setup()
+
+    openai_key = _read_secret("litellm_master_key")
+    if openai_key:
+        os.environ.setdefault("OPENAI_API_KEY", openai_key)
 
     graphs_dir = os.environ.get("GRAPHS_DIR", "/app/graphs")
     load_graphs(graphs_dir)
 
     yield
 
-    if _db_pool is not None:
-        await _db_pool.close()
+    if _pool is not None:
+        await _pool.close()
 
 
 app = FastAPI(lifespan=lifespan)
 
 
-def _verify_token(authorization: Annotated[str | None, Header()] = None) -> None:
+def _verify_token(authorization: str | None = Header(default=None)) -> None:
     api_key = get_api_key()
+    if not api_key:
+        return
     if authorization != f"Bearer {api_key}":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -97,6 +124,8 @@ async def thread_run(thread_id: str, request: RunRequest) -> RunResponse:
     graphs = get_graphs()
     if request.graph_name not in graphs:
         raise HTTPException(status_code=404, detail="Graph not found")
+    if _checkpointer is None:
+        raise HTTPException(status_code=503, detail="No database configured")
     graph = graphs[request.graph_name]
     config = {
         **request.config,
@@ -119,7 +148,7 @@ async def thread_run(thread_id: str, request: RunRequest) -> RunResponse:
 )
 async def get_thread_state(thread_id: str) -> dict:
     if _checkpointer is None:
-        raise HTTPException(status_code=503, detail="Checkpointer not ready")
+        raise HTTPException(status_code=503, detail="No database configured")
     config = {"configurable": {"thread_id": thread_id}}
     state = await _checkpointer.aget(config)
     if state is None:

@@ -1,0 +1,179 @@
+{
+  "name": "LangGraph Agent Gateway",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "langgraph/create-thread",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-create-thread",
+      "name": "Webhook Create Thread",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "langgraph/run",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-stateless-run",
+      "name": "Webhook Stateless Run",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "langgraph/thread-run",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-thread-run",
+      "name": "Webhook Thread Run",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -900,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://langgraph-agent:8000/threads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer local_langgraph_api_key"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-create-thread",
+      "name": "LangGraph Create Thread",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -560,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://langgraph-agent:8000/runs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer local_langgraph_api_key"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { graph_name: $json.body?.graph_name || 'echo', input: $json.body?.input || { message: $json.body?.message || 'hello stateless' }, config: $json.body?.config || {} } }}",
+        "options": {}
+      },
+      "id": "http-stateless-run",
+      "name": "LangGraph Stateless Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -560,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://langgraph-agent:8000/threads/{{ $json.body?.thread_id }}/runs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer local_langgraph_api_key"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { graph_name: $json.body?.graph_name || 'echo', input: $json.body?.input || { message: $json.body?.message || 'hello thread' }, config: $json.body?.config || {} } }}",
+        "options": {}
+      },
+      "id": "http-thread-run",
+      "name": "LangGraph Thread Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -560,
+        280
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Create Thread": {
+      "main": [
+        [
+          {
+            "node": "LangGraph Create Thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Stateless Run": {
+      "main": [
+        [
+          {
+            "node": "LangGraph Stateless Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Thread Run": {
+      "main": [
+        [
+          {
+            "node": "LangGraph Thread Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3"
+}

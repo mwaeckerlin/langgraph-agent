@@ -22,6 +22,12 @@ _llm = ChatOpenAI(
 
 
 def chat_node(state: State) -> State:
+    # Local/dev fallback: keep workflow usable even when no LLM auth is configured.
+    if not os.environ.get("OPENAI_API_KEY", "").strip():
+        return {
+            "message": state["message"],
+            "response": f"[local-echo] {state['message']}",
+        }
     result = _llm.invoke(state["message"])
     return {"message": state["message"], "response": result.content}
 
