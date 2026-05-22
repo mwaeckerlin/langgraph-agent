@@ -121,7 +121,10 @@ If key and base URL do not match, model calls fail with `401` authentication err
 After changing `.env`, restart the stack:
 
 - `npm run stop`
-- `npm run start`
+- `npm run build`
+- `npm start` (foreground) or `npm run start:daemon` (background)
+- browse to: `http://localhost:8000/docs` (interactive API docs)
+- stop with `Ctrl+C` (or `npm stop` for daemon mode)
 
 ### Command Line Example
 
