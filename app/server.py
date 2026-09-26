@@ -1,3 +1,4 @@
+import asyncio
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -19,6 +20,8 @@ from app.models import (
 
 _checkpointer: AsyncPostgresSaver | None = None
 _pool: AsyncConnectionPool | None = None
+# key of the advisory lock that serialises the checkpoint migration
+_MIGRATION_LOCK = 0x4C47414D  # "LGAM"
 
 
 def _read_secret(name: str, env_var: str | None = None) -> str:
@@ -49,7 +52,22 @@ async def lifespan(app: FastAPI):
     )
     await _pool.open()
     _checkpointer = AsyncPostgresSaver(_pool)
-    await _checkpointer.setup()
+    # Several instances on one database create the checkpoint tables at the
+    # same moment, and all but one died with «duplicate key value violates
+    # unique constraint checkpoint_migrations_pkey». A session-level advisory
+    # lock lets one instance migrate while the others wait, then find the
+    # tables in place. The waiters ask with pg_try_advisory_lock and sleep in
+    # between: a blocking pg_advisory_lock keeps a query open, the migration's
+    # CREATE INDEX CONCURRENTLY waits for every open query, and all instances
+    # hung at «Waiting for application startup».
+    async with _pool.connection() as lock:
+        while not (await (await lock.execute(
+                "SELECT pg_try_advisory_lock(%s)", (_MIGRATION_LOCK,))).fetchone())[0]:
+            await asyncio.sleep(0.5)
+        try:
+            await _checkpointer.setup()
+        finally:
+            await lock.execute("SELECT pg_advisory_unlock(%s)", (_MIGRATION_LOCK,))
 
     openai_key = _read_secret("litellm_master_key")
     if openai_key:
@@ -134,11 +152,11 @@ async def thread_run(thread_id: str, request: RunRequest) -> RunResponse:
             "thread_id": thread_id,
         },
     }
-    result = await graph.ainvoke(
-        request.input,
-        config=config,
-        checkpointer=_checkpointer,
-    )
+    # the checkpointer belongs to the compiled graph: passed to ainvoke() it was
+    # ignored, and no thread ever kept its state. A copy carries it, so the
+    # stateless runs of the same graph stay without one.
+    persistent = graph.copy(update={"checkpointer": _checkpointer})
+    result = await persistent.ainvoke(request.input, config=config)
     return RunResponse(output=result)
 
 
@@ -153,4 +171,6 @@ async def get_thread_state(thread_id: str) -> dict:
     state = await _checkpointer.aget(config)
     if state is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    return state.channel_values if hasattr(state, "channel_values") else {}
+    # aget() returns the checkpoint as a dict; asking it for an attribute
+    # answered every thread with {}
+    return state.get("channel_values", {})

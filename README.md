@@ -2,7 +2,7 @@
 
 [mwaeckerlin/langgraph-agent] is a minimalistic, highly optimized and secure image to run [LangGraph] agent workflows as a REST API.
 
-Built on top of [mwaeckerlin/python], using [mwaeckerlin/python-build] for multi-stage builds. No commercial license required — uses LangGraph as an open-source Python library.
+Built on top of [mwaeckerlin/python], using [mwaeckerlin/python-build] for multi-stage builds. No commercial license required — uses LangGraph as an open-source Python library.
 
 This image is intended as a self-hosted alternative to `langchain/langgraph-api` for local and on-prem deployments, without requiring platform registration or commercial runtime licensing.
 
@@ -19,34 +19,35 @@ Exposes API on port `8000`.
 
 ## Configuration
 
- - Graphs are loaded from `GRAPHS_DIR` (default `/app/graphs`) — mount `.py` modules with `graph`, `name`, `description` exports
- - Authentication via Docker secret `langgraph_api_key` or environment variable `LANGGRAPH_API_KEY`
+ - Graphs are loaded from `GRAPHS_DIR` (default `/app/graphs`) — mount `.py` modules with `graph`, `name`, `description` exports
+ - Authentication via Docker secret `langgraph_api_key` or environment variable `LANGGRAPH_API_KEY`; the secret wins
+ - **Trade-off:** without a key the API is open to everybody who reaches the port — every endpoint, including graph runs that call the LLM on your account. Always set a key where anybody else can reach the service.
  - LLM access via OpenAI-compatible endpoint (e.g. [LiteLLM])
 
 ### Environment Variables
 
- - `DATABASE_URI` — PostgreSQL connection string for checkpoint persistence (**required**, startup fails if missing)
- - `OPENAI_BASE_URL` — OpenAI-compatible API base URL (e.g. `http://litellm:4000/v1`)
- - `OPENAI_API_KEY` — API key for the LLM endpoint (can also be read from secret `litellm_master_key`)
- - `GRAPHS_DIR` — directory to scan for graph modules (default `/app/graphs`)
- - `LLM_MODEL` — default model name (default `gpt-4o-mini`)
+ - `DATABASE_URI` — PostgreSQL connection string for checkpoint persistence (**required**, startup fails if missing)
+ - `OPENAI_BASE_URL` — OpenAI-compatible API base URL (e.g. `http://litellm:4000/v1`)
+ - `OPENAI_API_KEY` — API key for the LLM endpoint (can also be read from secret `litellm_master_key`)
+ - `GRAPHS_DIR` — directory to scan for graph modules (default `/app/graphs`)
+ - `LLM_MODEL` — default model name (default `gpt-4o-mini`)
 
 ### Docker Secrets (optional)
 
 Secrets are read from `/run/secrets/` and take precedence over environment variables:
 
- - `langgraph_api_key` — Bearer token for API authentication
- - `litellm_master_key` — LLM endpoint API key (sets `OPENAI_API_KEY`)
- - `langgraph_db_password` — fallback to construct `DATABASE_URI` when `DATABASE_URI` is not set
+ - `langgraph_api_key` — Bearer token for API authentication
+ - `litellm_master_key` — LLM endpoint API key (sets `OPENAI_API_KEY`)
+ - `langgraph_db_password` — fallback to construct `DATABASE_URI` when `DATABASE_URI` is not set
 
 ### API Endpoints
 
- - `GET /ok` — health check (no auth required)
- - `GET /graphs` — list loaded graphs
- - `POST /runs` — execute a graph statelessly
- - `POST /threads` — create a conversation thread
- - `POST /threads/{thread_id}/runs` — execute a graph with checkpoint persistence
- - `GET /threads/{thread_id}/state` — retrieve thread state
+ - `GET /ok` — health check (no auth required)
+ - `GET /graphs` — list loaded graphs
+ - `POST /runs` — execute a graph statelessly
+ - `POST /threads` — create a conversation thread
+ - `POST /threads/{thread_id}/runs` — execute a graph with checkpoint persistence
+ - `GET /threads/{thread_id}/state` — retrieve thread state
 
 ## Compared to langchain/langgraph-api
 
@@ -117,8 +118,7 @@ Provider/Key matching is mandatory:
 - OpenAI key (`sk-...`) requires:
   - `OPENAI_BASE_URL=https://api.openai.com/v1`
 
-If key and base URL do not match, model calls fail with `401` authentication errors.
-After changing `.env`, restart the stack:
+If key and base URL do not match, model calls fail with `401` authentication errors. After changing `.env`, restart the stack:
 
 - `npm run stop`
 - `npm run build`
@@ -128,7 +128,11 @@ After changing `.env`, restart the stack:
 
 ### Command Line Example
 
-    docker run -it --rm --name agent -p 8583:8000 mwaeckerlin/langgraph-agent
+The service needs a PostgreSQL database; with one reachable as `db`:
+
+```bash
+$ docker run -it --rm --name agent -p 8583:8000 -e DATABASE_URI=postgresql://user:password@db:5432/langgraph -e LANGGRAPH_API_KEY=my-key mwaeckerlin/langgraph-agent
+```
 
 Browse to http://localhost:8583/ok. Returns `{"status": "ok"}` when healthy.
 
@@ -136,13 +140,13 @@ Browse to http://localhost:8583/ok. Returns `{"status": "ok"}` when healthy.
 
 Place `.py` files in `GRAPHS_DIR` (default `/app/graphs`). Each module must expose:
 
- - `graph` — compiled LangGraph `StateGraph`
- - `name` — unique graph identifier (str)
- - `description` — human-readable description (str)
+ - `graph` — compiled LangGraph `StateGraph`
+ - `name` — unique graph identifier (str)
+ - `description` — human-readable description (str)
 
 Example: see [`graphs/echo.py`](graphs/echo.py).
 
-## Minimal Setup: n8n Tests LangGraph
+## Minimal n8n Setup
 
 This repository contains a minimal local stack (`db`, `n8n`, `langgraph-agent`) and an importable n8n workflow template.
 
@@ -178,10 +182,16 @@ Start it with:
 LLM auth note:
 - If `OPENAI_API_KEY` is missing, `echo` falls back to local response mode and returns `"[local-echo] <message>"`.
 - For real model output, set a valid `OPENAI_API_KEY` for the configured `OPENAI_BASE_URL`.
+
+## Development
+
+```bash
+$ npm run build
+$ npm test
+```
+
+`npm test` checks the feature register ([FEATURES.md](FEATURES.md), [TESTS.md](TESTS.md)), the headless image contract, and runs the end-to-end suite `tests/run-e2e.sh`: a real PostgreSQL, the agent with the key from the environment, from a secret and without key, a local OpenAI compatible endpoint, a restart in the middle, and a start without database. The image is built and published for `linux/amd64` and `linux/arm64` by the reusable workflow of [mwaeckerlin/scratch](https://github.com/mwaeckerlin/scratch#publishing-on-docker-hub).
+
 ----
 
-[LangGraph]: https://github.com/langchain-ai/langgraph "LangGraph on GitHub"
-[LiteLLM]: https://github.com/BerriAI/litellm "LiteLLM on GitHub"
-[mwaeckerlin/langgraph-agent]: https://hub.docker.com/r/mwaeckerlin/langgraph-agent "get the image from docker hub"
-[mwaeckerlin/python]: https://hub.docker.com/r/mwaeckerlin/python "minimalistic Python runtime image"
-[mwaeckerlin/python-build]: https://hub.docker.com/r/mwaeckerlin/python-build "Python build image"
+[LangGraph]: https://github.com/langchain-ai/langgraph "LangGraph on GitHub" [LiteLLM]: https://github.com/BerriAI/litellm "LiteLLM on GitHub" [mwaeckerlin/langgraph-agent]: https://hub.docker.com/r/mwaeckerlin/langgraph-agent "get the image from docker hub" [mwaeckerlin/python]: https://hub.docker.com/r/mwaeckerlin/python "minimalistic Python runtime image" [mwaeckerlin/python-build]: https://hub.docker.com/r/mwaeckerlin/python-build "Python build image"

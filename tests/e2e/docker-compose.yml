@@ -1,0 +1,125 @@
+# E2E stack for mwaeckerlin/langgraph-agent: a real PostgreSQL for the
+# checkpoints, the agent in three configurations, and a client that uses only
+# the Python standard library. No LLM key is set, so the echo graph answers
+# locally ("[local-echo] ...") and no external service is involved.
+name: langgraph-agent-e2e
+
+x-agent: &agent
+  image: mwaeckerlin/langgraph-agent
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: langgraph
+      POSTGRES_USER: langgraph
+      POSTGRES_PASSWORD: e2e-db-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langgraph -d langgraph"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # key from the environment, an additional graph from a mounted directory
+  agent:
+    <<: *agent
+    build:
+      context: ../..
+    environment:
+      DATABASE_URI: postgresql://langgraph:e2e-db-password@db:5432/langgraph
+      LANGGRAPH_API_KEY: env-key
+      GRAPHS_DIR: /graphs
+    volumes:
+      - ../../graphs/echo.py:/graphs/echo.py:ro
+      - ./graphs/upper.py:/graphs/upper.py:ro
+
+  # key from a Docker secret, which wins over the environment; database from
+  # the secret langgraph_db_password
+  agent-secret:
+    <<: *agent
+    environment:
+      LANGGRAPH_API_KEY: env-key-that-must-lose
+    # mounted where Docker secrets appear; inline configs keep the test
+    # values in this file
+    configs:
+      - source: api_key
+        target: /run/secrets/langgraph_api_key
+      - source: db_password
+        target: /run/secrets/langgraph_db_password
+
+  # no key at all
+  agent-open:
+    <<: *agent
+    environment:
+      DATABASE_URI: postgresql://langgraph:e2e-db-password@db:5432/langgraph
+
+  # with an LLM key: the echo graph asks the model; the key comes from the
+  # secret litellm_master_key
+  agent-llm:
+    <<: *agent
+    environment:
+      DATABASE_URI: postgresql://langgraph:e2e-db-password@db:5432/langgraph
+      OPENAI_BASE_URL: http://fake-llm:8080/v1
+      LLM_MODEL: e2e-model
+    configs:
+      - source: llm_key
+        target: /run/secrets/litellm_master_key
+    depends_on:
+      db:
+        condition: service_healthy
+      fake-llm:
+        condition: service_started
+
+  # a local OpenAI compatible endpoint: answers every chat completion with
+  # the model name, the key it received and the last user message
+  fake-llm:
+    image: python:3.12-slim
+    command:
+      - python
+      - -c
+      - |
+        import http.server, json
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                text = f"model={body['model']} key={self.headers.get('Authorization')} said={body['messages'][-1]['content']}"
+                answer = json.dumps({'id': 'e2e', 'object': 'chat.completion', 'created': 0, 'model': body['model'],
+                                     'choices': [{'index': 0, 'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': text}}],
+                                     'usage': {'prompt_tokens': 1, 'completion_tokens': 1, 'total_tokens': 2}}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(answer)))
+                self.end_headers()
+                self.wfile.write(answer)
+        http.server.HTTPServer(('', 8080), H).serve_forever()
+
+  # no database: must not start
+  agent-nodb:
+    image: mwaeckerlin/langgraph-agent
+    profiles:
+      - nodb
+
+  tester:
+    image: python:3.12-slim
+    profiles:
+      - tester
+    working_dir: /tests
+    volumes:
+      - ./:/tests:ro
+      - state:/state
+    command: ["python", "-u", "test_api.py"]
+
+volumes:
+  # carries the thread id from the run before the restart to the run after it
+  state:
+
+configs:
+  api_key:
+    content: secret-key
+  db_password:
+    content: e2e-db-password
+  llm_key:
+    content: e2e-llm-key

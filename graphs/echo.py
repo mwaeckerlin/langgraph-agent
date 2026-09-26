@@ -14,11 +14,14 @@ class State(TypedDict):
     response: str
 
 
-_llm = ChatOpenAI(
-    base_url=os.environ.get("OPENAI_BASE_URL"),
-    api_key=os.environ.get("OPENAI_API_KEY", ""),
-    model=os.environ.get("LLM_MODEL", "gpt-4o-mini"),
-)
+def _llm() -> ChatOpenAI:
+    # created on use: the OpenAI client refuses an empty key already when it
+    # is constructed, which at import time kept the whole service from starting
+    return ChatOpenAI(
+        base_url=os.environ.get("OPENAI_BASE_URL"),
+        api_key=os.environ["OPENAI_API_KEY"],
+        model=os.environ.get("LLM_MODEL", "gpt-4o-mini"),
+    )
 
 
 def chat_node(state: State) -> State:
@@ -28,7 +31,7 @@ def chat_node(state: State) -> State:
             "message": state["message"],
             "response": f"[local-echo] {state['message']}",
         }
-    result = _llm.invoke(state["message"])
+    result = _llm().invoke(state["message"])
     return {"message": state["message"], "response": result.content}
 
 
